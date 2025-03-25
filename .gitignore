@@ -1,0 +1,25 @@
+# Arquivo de ambiente
+.env
+
+# Dependências do Node.js
+node_modules/
+
+#tokens
+tokens
+locked/
+# Logs
+logs/
+*.log
+
+# Banco de Dados
+*.sqlite
+*.db
+
+# Arquivos do editor
+.vscode/
+.idea/
+.DS_Store
+
+# Outros
+dist/
+build/
