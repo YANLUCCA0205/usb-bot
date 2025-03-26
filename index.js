@@ -45,54 +45,127 @@ async function addMessageToSheet(sheets, message, userPhoneNumber) {
 }
 
 function parseMessage(message) {
-  const lancamentoNotaPattern = /Lançamento de Cupom Fiscal\s+Cod: \s*(\d+)\s*Nome: ([\wÀ-ÿ\s]+)\s+Data:\s*(\d{2}\/\d{2}\/\d{4})\s+Coo: (\d+)\s+Operadora: ([\wÀ-ÿ\s]+)\s+Ecf: (\d+)\s+Valor: (R\$ [\d,]+\.\d{2})/;
-  const lancamentoNotinhaPattern = /Lançamento de Notinha Branca\s+Cod:\s*(\d+)\s+Nome:\s*([\wÀ-ÿ\s]+)\s+Data:\s*(\d{2}\/\d{2}\/\d{4})\s+Valor:\s*(R\$\s*[\d,.]+)/;
-  const aumentoLimitePattern = /Aumento de Limite[\s\S]*?Cod: (\d+)[\s\S]*?Nome: ([\w\s]+)[\s\S]*?Valor: (R\$ [\d,]+\.\d{2})[\s\S]*?E-mail: ([\w\.\-]+@[\w\-]+\.[a-z]{2,})/;
+  // Converte a mensagem para um formato padrão para melhor matching
+  const normalizedBody = message.body.replace(/\s+/g, ' ').trim();
+
+  const lancamentoNotaPattern = /Lançamento de Cupom Fiscal\s+Cod:\s*(\d+)\s+Nome:\s*([\wÀ-ÿ\s]+)\s+Data:\s*(\d{2}\/\d{2}\/\d{4})\s+Coo:\s*(\d+)\s+Operadora:\s*([\wÀ-ÿ\s]+)\s+Ecf:\s*(\d+)\s+Valor:\s*(R\$\s*[\d,]+\.\d{2})/i;
+  const lancamentoNotinhaPattern = /Lançamento de Notinha Branca\s+Cod:\s*(\d+)\s+Nome:\s*([\wÀ-ÿ\s]+)\s+Data:\s*(\d{2}\/\d{2}\/\d{4})\s+Valor:\s*(R\$\s*[\d,.]+)/i;
+  const aumentoLimitePattern = /Aumento de Limite[\s\S]*?Cod:\s*(\d+)[\s\S]*?Nome:\s*([\w\s]+)[\s\S]*?Valor:\s*(R\$\s*[\d,]+\.\d{2})[\s\S]*?E-mail:\s*([\w\.\-]+@[\w\-]+\.[a-z]{2,})/i;
 
   let responseMessage = '';
   let messageData = {};
 
-  if (lancamentoNotaPattern.test(message.body)) {
-    const match = message.body.match(lancamentoNotaPattern);
+  if (lancamentoNotaPattern.test(normalizedBody)) {
+    const match = normalizedBody.match(lancamentoNotaPattern);
     if (!match) return { responseMessage: 'Erro ao processar mensagem.', messageData: {} };
-    messageData = { tipo: 'Lançamento de Cupom Fiscal', cod: match[1], nome: match[2], data: match[3], coo: match[4], operadora: match[5], ecf: match[6], valor: match[7], email: "" };
-    responseMessage = `Você enviou um lançamento de nota fiscal:\n\nCod: ${match[1]}\nNome: ${match[2]}\nData: ${match[3]}\nCoo: ${match[4]}\nOperadora: ${match[5]}\nEcf: ${match[6]}\nValor: ${match[7]}`;
-  } else if (lancamentoNotinhaPattern.test(message.body)) {
-    const match = message.body.match(lancamentoNotinhaPattern);
+
+    messageData = {
+      tipo: 'Lançamento de Cupom Fiscal',
+      cod: match[1],
+      nome: match[2].trim(),
+      data: match[3],
+      coo: match[4],
+      operadora: match[5].trim(),
+      ecf: match[6],
+      valor: match[7],
+      email: ""
+    };
+    responseMessage = `Lançamento de Cupom Fiscal:\n\nCod: ${match[1]}\nNome: ${match[2]}\nData: ${match[3]}\nCoo: ${match[4]}\nOperadora: ${match[5]}\nEcf: ${match[6]}\nValor: ${match[7]}`;
+  } else if (lancamentoNotinhaPattern.test(normalizedBody)) {
+    const match = normalizedBody.match(lancamentoNotinhaPattern);
     if (!match) return { responseMessage: 'Erro ao processar mensagem.', messageData: {} };
-    messageData = { tipo: 'Lançamento de Notinha Branca', cod: match[1], nome: match[2], data: match[3], coo: "-", operadora: "-", ecf: "-", valor: match[4], email: "-" };
-    responseMessage = `Você enviou um lançamento de notinha branca:\n\nCod: ${match[1]}\nNome: ${match[2]}\nData: ${match[3]}\nValor: ${match[4]}`;
-  } else if (aumentoLimitePattern.test(message.body)) {
-    const match = message.body.match(aumentoLimitePattern);
+
+    messageData = {
+      tipo: 'Lançamento de Notinha Branca',
+      cod: match[1],
+      nome: match[2].trim(),
+      data: match[3],
+      coo: "-",
+      operadora: "-",
+      ecf: "-",
+      valor: match[4],
+      email: "-"
+    };
+    responseMessage = `Lançamento de Notinha Branca:\n\nCod: ${match[1]}\nNome: ${match[2]}\nData: ${match[3]}\nValor: ${match[4]}`;
+  } else if (aumentoLimitePattern.test(normalizedBody)) {
+    const match = normalizedBody.match(aumentoLimitePattern);
     if (!match) return { responseMessage: 'Erro ao processar mensagem.', messageData: {} };
-    messageData = { tipo: 'Aumento de Limite', cod: match[1], nome: match[2], data: "-", coo: "-", operadora: "-", ecf: "-", valor: match[3], email: match[4] };
-    responseMessage = `Você enviou um aumento de limite:\n\nCod: ${match[1]}\nNome: ${match[2]}\nValor: ${match[3]}\nE-mail: ${match[4]}`;
+
+    messageData = {
+      tipo: 'Aumento de Limite',
+      cod: match[1],
+      nome: match[2].trim(),
+      data: "-",
+      coo: "-",
+      operadora: "-",
+      ecf: "-",
+      valor: match[3],
+      email: match[4]
+    };
+    responseMessage = `Aumento de Limite:\n\nCod: ${match[1]}\nNome: ${match[2]}\nValor: ${match[3]}\nE-mail: ${match[4]}`;
   } else {
     responseMessage = 'Mensagem não reconhecida.';
     messageData = {};
   }
+
   return { responseMessage, messageData };
 }
 
-venom.create({ session: 'my-session', headless: 'new', browserArgs: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu', '--disable-dev-shm-usage'] }).then((client) => {
+venom.create({
+  session: 'my-session',
+  headless: 'new',
+  browserArgs: [
+    '--no-sandbox',
+    '--disable-setuid-sandbox',
+    '--disable-gpu',
+    '--disable-dev-shm-usage'
+  ]
+}).then((client) => {
+  console.log('✅ Bot inicializado com sucesso!');
+
   client.onMessage(async (message) => {
-    if (message.body) {
-      console.log(`📩 Mensagem recebida: ${message.body}`);
-      const userPhoneNumber = message.from;
-      const { responseMessage, messageData } = parseMessage(message);
-      if (messageData.tipo) {
-        const sheets = await authenticateGoogleSheets();
-        const messageId = await addMessageToSheet(sheets, messageData, userPhoneNumber);
-        if (messageId) {
-          client.sendText(message.from, `✅ Mensagem registrada com sucesso! Seu ID de confirmação é: #${messageId}`);
+    try {
+      if (message.body) {
+        console.log(`📩 Mensagem recebida de ${message.from}: ${message.body}`);
+        const userPhoneNumber = message.from;
+        const { responseMessage, messageData } = parseMessage(message);
+
+        if (messageData.tipo) {
+          const sheets = await authenticateGoogleSheets();
+          const messageId = await addMessageToSheet(sheets, messageData, userPhoneNumber);
+          const groupIdteste = '553499630454-1567631375@g.us';
+
+          if (messageId) {
+            client.sendText(message.from, `✅ Mensagem registrada com sucesso! Seu ID de confirmação é: #${messageId}`);
+            client.sendText(groupIdteste, `📢 *Novo lançamento registrado!* \n\n${responseMessage}`);
+          } else {
+            client.sendText(message.from, '⚠️ Erro ao registrar mensagem. Entre em contato com meu chefe: 99963-0454');
+          }
         } else {
-          client.sendText(message.from, '⚠️ Erro ao registrar mensagem. Entre em contato com meu chefe: 99963-0454');
+          // Log de mensagens não reconhecidas
+          console.log(`❓ Mensagem não reconhecida: ${message.body}`);
+
+          // Mensagem de ajuda personalizada
+          const helpMessage = `Olá! 🤖 
+
+Parece que sua mensagem não corresponde aos formatos esperados. 
+
+Formatos válidos:
+1. Lançamento de Cupom Fiscal
+2. Lançamento de Notinha Branca
+3. Aumento de Limite
+
+Para ajuda, entre em contato: 343321-3147 📞`;
+
+          client.sendText(message.from, helpMessage);
         }
-      } else {
-        client.sendText(message.from, responseMessage);
       }
+    } catch (error) {
+      console.error('❌ Erro no processamento da mensagem:', error);
+      // Adiciona tratamento de erro para enviar mensagem ao usuário
+      client.sendText(message.from, 'Desculpe, ocorreu um erro no processamento da sua mensagem.');
     }
   });
 }).catch((error) => {
-  console.log('❌ Erro ao criar o bot:', error);
+  console.error('❌ Erro crítico ao criar o bot:', error);
 });
