@@ -16,31 +16,42 @@ async function authenticateGoogleSheets() {
   return google.sheets({ version: 'v4', auth });
 }
 
-async function addMessageToSheet(sheets, message, userPhoneNumber) {
-  const sheetId = '18akn_Oi_2L2IakzW-2_JUy6I88JhPmCKHnrXWg-cLic';
-  const range = 'Lançamento de Nota Fiscal!A2:M2';
-
-  const uniqueId = Math.floor(100000 + Math.random() * 900000).toString() + Date.now().toString().slice(-3);
-  const values = [
-    uniqueId, message.tipo, message.cod, message.nome, message.data, message.coo,
-    message.operadora, message.ecf, message.valor, message.email || "-",
-    userPhoneNumber, new Date().toLocaleString()
-  ];
-
-  const resource = { values: [values] };
+// Função para obter ou atualizar informações do contato
+async function getOrUpdateContact(sheets, phoneNumber) {
+  const sheetId = '18akn_Oi_2L2IakzW-2_JUy6I88JhPmCKHnrXWg-cLic'; // ID da planilha de contatos
+  const range = 'Contatos!A:C'; // Planilha de Contatos, colunas A a C
 
   try {
-    await sheets.spreadsheets.values.append({
+    // Buscar dados da planilha
+    const response = await sheets.spreadsheets.values.get({
       spreadsheetId: sheetId,
       range: range,
-      valueInputOption: 'USER_ENTERED',
-      resource: resource,
     });
-    console.log('✅ Mensagem registrada com sucesso!');
-    return uniqueId;
+
+    const rows = response.data.values || [];
+
+    // Procurar contato pelo número de telefone
+    const contactRow = rows.find(row => row[1] === phoneNumber);
+
+    if (contactRow) {
+      // Se encontrar, retorna o nome salvo
+      return contactRow[0] || phoneNumber;
+    } else {
+      // Se não encontrar, adicionar novo contato com o número
+      const newContact = [phoneNumber, phoneNumber, new Date().toLocaleString()];
+
+      await sheets.spreadsheets.values.append({
+        spreadsheetId: sheetId,
+        range: range,
+        valueInputOption: 'USER_ENTERED',
+        resource: { values: [newContact] },
+      });
+
+      return phoneNumber;
+    }
   } catch (error) {
-    console.error('❌ Erro ao registrar mensagem:', error.response?.data || error.message);
-    return null;
+    console.error('❌ Erro ao gerenciar contatos:', error);
+    return phoneNumber; // Fallback para o número em caso de erro
   }
 }
 
@@ -120,33 +131,41 @@ venom.create({
     '--disable-gpu',
     '--disable-dev-shm-usage'
   ]
-}).then((client) => {
+}).then(async (client) => {
   console.log('✅ Bot inicializado com sucesso!');
+
+  const sheets = await authenticateGoogleSheets();  // Autenticar Google Sheets na inicialização
+  const gruposBloqueados = ['120363220294330138@g.us']; // Lista de grupos que o bot NÃO deve ler
 
   client.onMessage(async (message) => {
     try {
+      // Verifica se a mensagem veio de um grupo bloqueado
+      if (message.isGroupMsg && gruposBloqueados.includes(message.from)) {
+        return; // Sai da função sem processar
+      }
       if (message.body) {
         console.log(`📩 Mensagem recebida de ${message.from}: ${message.body}`);
+
+        // Obter ou atualizar informações do contato
+        const contactName = await getOrUpdateContact(sheets, message.from);
         const userPhoneNumber = message.from;
         const { responseMessage, messageData } = parseMessage(message);
 
-        if (messageData.tipo) {
-          const sheets = await authenticateGoogleSheets();
-          const messageId = await addMessageToSheet(sheets, messageData, userPhoneNumber);
-          const groupIdteste = '553499630454-1567631375@g.us';
+        //Ativar quando for testar 
+        // const groupId = '553499630454-1567631375@g.us';
+        // Grupo Lançamento de Notas
+        const groupId = '120363220294330138@g.us';
+        
 
-          if (messageId) {
-            client.sendText(message.from, `✅ Mensagem registrada com sucesso! Seu ID de confirmação é: #${messageId}`);
-            client.sendText(groupIdteste, `📢 *Novo lançamento registrado!* \n\n${responseMessage}`);
-          } else {
-            client.sendText(message.from, '⚠️ Erro ao registrar mensagem. Entre em contato com meu chefe: 99963-0454');
-          }
+        if (messageData.tipo) {
+          client.sendText(message.from, `✅ Mensagem identificada, olá  ${contactName}! Seu ID de registro é: #${Math.floor(100000 + Math.random() * 900000)}`);
+          client.sendText(groupId, `📢 *Novo lançamento registrado por ${contactName}!* \n\n${responseMessage}`);
         } else {
           // Log de mensagens não reconhecidas
           console.log(`❓ Mensagem não reconhecida: ${message.body}`);
 
           // Mensagem de ajuda personalizada
-          const helpMessage = `Olá! 🤖 
+          const helpMessage = `Olá, ${contactName}! 🤖 
 
 Parece que sua mensagem não corresponde aos formatos esperados. 
 
