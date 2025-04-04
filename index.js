@@ -59,13 +59,21 @@ function parseMessage(message) {
   // Converte a mensagem para um formato padrão para melhor matching
   const normalizedBody = message.body.replace(/\s+/g, ' ').trim();
 
-  const lancamentoNotaPattern = /Lançamento de Cupom Fiscal\s+Cod:\s*(\d+)\s+Nome:\s*([\wÀ-ÿ\s]+)\s+Data:\s*(\d{2}\/\d{2}\/\d{4})\s+Coo:\s*(\d+)\s+Operadora:\s*([\wÀ-ÿ\s]+)\s+Ecf:\s*(\d+)\s+Valor:\s*(R\$\s*[\d,]+\.\d{2})/i;
-  const lancamentoNotinhaPattern = /Lançamento de Notinha Branca\s+Cod:\s*(\d+)\s+Nome:\s*([\wÀ-ÿ\s]+)\s+Data:\s*(\d{2}\/\d{2}\/\d{4})\s+Valor:\s*(R\$\s*[\d,.]+)/i;
-  const aumentoLimitePattern = /Aumento de Limite[\s\S]*?Cod:\s*(\d+)[\s\S]*?Nome:\s*([\w\s]+)[\s\S]*?Valor:\s*(R\$\s*[\d,]+\.\d{2})[\s\S]*?E-mail:\s*([\w\.\-]+@[\w\-]+\.[a-z]{2,})/i;
+  // Padrões atualizados para capturar campos opcionais como observação
+  const lancamentoNotaPattern = /Lançamento de Cupom Fiscal\s+Cod:\s*(\d+)\s+Nome:\s*([\wÀ-ÿ\s]+)\s+Data:\s*(\d{2}\/\d{2}\/\d{4})\s+Coo:\s*(\d+)\s+Operadora:\s*([\wÀ-ÿ\s]+)\s+Ecf:\s*(\d+)\s+Valor:\s*(R\$\s*[\d,.]+)(?:\s+Observação:\s*([\s\S]*))?/i;
+
+  const lancamentoNotinhaPattern = /Lançamento de Notinha Branca\s+Cod:\s*(\d+)\s+Nome:\s*([\wÀ-ÿ\s]+)\s+Data:\s*(\d{2}\/\d{2}\/\d{4})\s+Valor:\s*(R\$\s*[\d,.]+)(?:\s+Observação:\s*([\s\S]*))?/i;
+
+  const aumentoLimitePattern = /Aumento de Limite\s+Cod:\s*(\d+)\s+Nome:\s*([\wÀ-ÿ\s]+)\s+Valor:\s*(R\$\s*[\d,.]+)\s+E-mail:\s*([\w.+-]+@[\w-]+\.[a-zA-Z0-9-.]+)/i;
+
+  // Novos padrões para Situação 70
+  const adicionarSituacao70Pattern = /Adicionar Situação 70\s+Cod:\s*(\d+)\s+Nome:\s*([\wÀ-ÿ\s]+)/i;
+  const removerSituacao70Pattern = /Remover Situação 70\s+Cod:\s*(\d+)\s+Nome:\s*([\wÀ-ÿ\s]+)/i;
 
   let responseMessage = '';
   let messageData = {};
 
+  // Verificação para lançamento de cupom fiscal
   if (lancamentoNotaPattern.test(normalizedBody)) {
     const match = normalizedBody.match(lancamentoNotaPattern);
     if (!match) return { responseMessage: 'Erro ao processar mensagem.', messageData: {} };
@@ -79,10 +87,19 @@ function parseMessage(message) {
       operadora: match[5].trim(),
       ecf: match[6],
       valor: match[7],
-      email: ""
+      email: "",
+      observacao: match[8] || "" // Campo opcional
     };
+
     responseMessage = `Lançamento de Cupom Fiscal:\n\nCod: ${match[1]}\nNome: ${match[2]}\nData: ${match[3]}\nCoo: ${match[4]}\nOperadora: ${match[5]}\nEcf: ${match[6]}\nValor: ${match[7]}`;
-  } else if (lancamentoNotinhaPattern.test(normalizedBody)) {
+
+    // Adiciona observação se existir
+    if (match[8]) {
+      responseMessage += `\nObservação: ${match[8]}`;
+    }
+  }
+  // Verificação para lançamento de notinha branca
+  else if (lancamentoNotinhaPattern.test(normalizedBody)) {
     const match = normalizedBody.match(lancamentoNotinhaPattern);
     if (!match) return { responseMessage: 'Erro ao processar mensagem.', messageData: {} };
 
@@ -95,10 +112,19 @@ function parseMessage(message) {
       operadora: "-",
       ecf: "-",
       valor: match[4],
-      email: "-"
+      email: "-",
+      observacao: match[5] || "" // Campo opcional
     };
+
     responseMessage = `Lançamento de Notinha Branca:\n\nCod: ${match[1]}\nNome: ${match[2]}\nData: ${match[3]}\nValor: ${match[4]}`;
-  } else if (aumentoLimitePattern.test(normalizedBody)) {
+
+    // Adiciona observação se existir
+    if (match[5]) {
+      responseMessage += `\nObservação: ${match[5]}`;
+    }
+  }
+  // Verificação para aumento de limite
+  else if (aumentoLimitePattern.test(normalizedBody)) {
     const match = normalizedBody.match(aumentoLimitePattern);
     if (!match) return { responseMessage: 'Erro ao processar mensagem.', messageData: {} };
 
@@ -113,8 +139,48 @@ function parseMessage(message) {
       valor: match[3],
       email: match[4]
     };
+
     responseMessage = `Aumento de Limite:\n\nCod: ${match[1]}\nNome: ${match[2]}\nValor: ${match[3]}\nE-mail: ${match[4]}`;
-  } else {
+  }
+  // Verificação para adicionar situação 70
+  else if (adicionarSituacao70Pattern.test(normalizedBody)) {
+    const match = normalizedBody.match(adicionarSituacao70Pattern);
+    if (!match) return { responseMessage: 'Erro ao processar mensagem.', messageData: {} };
+
+    messageData = {
+      tipo: 'Adicionar Situação 70',
+      cod: match[1],
+      nome: match[2].trim(),
+      data: "-",
+      coo: "-",
+      operadora: "-",
+      ecf: "-",
+      valor: "-",
+      email: "-"
+    };
+
+    responseMessage = `Adicionar Situação 70:\n\nCod: ${match[1]}\nNome: ${match[2]}`;
+  }
+  // Verificação para remover situação 70
+  else if (removerSituacao70Pattern.test(normalizedBody)) {
+    const match = normalizedBody.match(removerSituacao70Pattern);
+    if (!match) return { responseMessage: 'Erro ao processar mensagem.', messageData: {} };
+
+    messageData = {
+      tipo: 'Remover Situação 70',
+      cod: match[1],
+      nome: match[2].trim(),
+      data: "-",
+      coo: "-",
+      operadora: "-",
+      ecf: "-",
+      valor: "-",
+      email: "-"
+    };
+
+    responseMessage = `Remover Situação 70:\n\nCod: ${match[1]}\nNome: ${match[2]}`;
+  }
+  else {
     responseMessage = 'Mensagem não reconhecida.';
     messageData = {};
   }
@@ -151,30 +217,48 @@ venom.create({
         const userPhoneNumber = message.from;
         const { responseMessage, messageData } = parseMessage(message);
 
-        //Ativar quando for testar 
-        // const groupId = '553499630454-1567631375@g.us';
-        // Grupo Lançamento de Notas
-        const groupId = '120363220294330138@g.us';
-        
+
+        //--------------------------------------------------------------------------------------------------------------------//
+        //Ativar quando for testar                                                                                            //
+        const groupId = '553499630454-1567631375@g.us';                                                                       //
+        // Grupo Lançamento de Notas                                                                                          //
+        //const groupId = '120363220294330138@g.us';                                                                          //
+        //--------------------------------------------------------------------------------------------------------------------//
+
+
 
         if (messageData.tipo) {
-          client.sendText(message.from, `✅ Mensagem identificada, olá  ${contactName}! Seu ID de registro é: #${Math.floor(100000 + Math.random() * 900000)}`);
-          client.sendText(groupId, `📢 *Novo lançamento registrado por ${contactName}!* \n\n${responseMessage}`);
+          const registroId = Math.floor(100000 + Math.random() * 900000);
+          client.sendText(message.from, `✅ Mensagem identificada, olá ${contactName}! Seu ID de registro é: #${registroId}`);
+
+          // Determinar qual grupo deve receber a notificação com base no tipo
+          let notificationGroupId = groupId;
+
+          // Opcional: Se quiser direcionar os tipos de mensagem para grupos diferentes
+          // if (messageData.tipo.includes('Situação 70')) {
+          //     notificationGroupId = 'ID_DO_GRUPO_SITUACAO70@g.us';
+          // }
+
+          client.sendText(notificationGroupId, `📢 *Novo ${messageData.tipo} registrado por ${contactName}!* \n\n${responseMessage}`);
+
+          // Opcional: Armazenar no Google Sheets
+          // await storeMessageInSheet(sheets, messageData, contactName, registroId);
         } else {
           // Log de mensagens não reconhecidas
           console.log(`❓ Mensagem não reconhecida: ${message.body}`);
 
           // Mensagem de ajuda personalizada
           const helpMessage = `Olá, ${contactName}! 🤖 
-
-Parece que sua mensagem não corresponde aos formatos esperados. 
-
-Formatos válidos:
-1. Lançamento de Cupom Fiscal
-2. Lançamento de Notinha Branca
-3. Aumento de Limite
-
-Para ajuda, entre em contato: 343321-3147 📞`;
+  
+  Parece que sua mensagem não corresponde aos formatos esperados. 
+  
+  Formatos válidos:
+  1. Lançamento de Cupom Fiscal
+  2. Lançamento de Notinha Branca
+  3. Aumento de Limite
+  4. Adicionar/Remover Situação 70
+  
+  Para ajuda, entre em contato: 343321-3147 📞`;
 
           client.sendText(message.from, helpMessage);
         }
