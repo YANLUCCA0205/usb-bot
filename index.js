@@ -1,11 +1,13 @@
-require('dotenv').config()
+require('dotenv').config();
 const venom = require('venom-bot');
 const { google } = require('googleapis');
 const fs = require('fs');
 
+const groupMembers = new Set(); // Armazena os membros do grupo autorizado
+
 async function authenticateGoogleSheets() {
   const credentials = JSON.parse(
-    fs.readFileSync('C:/Users/y.mota/USBY/usb-bot/locked/vertical-sunset-454212-d1-3eb2a71f7ad2.json', 'utf-8')
+    fs.readFileSync('C:/Users/y.mota/USBY/usb-bot/locked/key.json', 'utf-8')
   );
 
   const auth = new google.auth.GoogleAuth({
@@ -16,64 +18,164 @@ async function authenticateGoogleSheets() {
   return google.sheets({ version: 'v4', auth });
 }
 
-// Função para obter ou atualizar informações do contato
-async function getOrUpdateContact(sheets, phoneNumber) {
-  const sheetId = '18akn_Oi_2L2IakzW-2_JUy6I88JhPmCKHnrXWg-cLic'; // ID da planilha de contatos
-  const range = 'Contatos!A:C'; // Planilha de Contatos, colunas A a C
+// Função atualizada para verificar se o contato é membro do grupo
+async function checkContact(phoneNumber, client) {
+  try {
+    // Primeiro verifica se é membro do grupo
+    if (isAuthorizedMember(phoneNumber)) {
+      // Aqui está o problema: estamos retornando apenas o número como nome
+      // Vamos buscar o nome real do contato
+      try {
+        const contactInfo = await client.getContact(phoneNumber);
+        const contactName = contactInfo.name || contactInfo.pushname || phoneNumber;
+        return {
+          name: contactName,
+          authorized: true
+        };
+      } catch (contactError) {
+        console.error('Erro ao buscar informações do contato:', contactError);
+        return {
+          name: phoneNumber,
+          authorized: true
+        };
+      }
+    }
+
+    // Se não for membro do grupo, verifica se é um número autorizado manualmente
+    const autorizadosManualmente = [
+      "553432213147@c.us", // Adicione aqui números que devem ter acesso
+      // Adicione outros números conforme necessário
+    ];
+
+    if (autorizadosManualmente.includes(phoneNumber)) {
+      // Aqui também devemos buscar o nome do contato
+      try {
+        const contactInfo = await client.getContact(phoneNumber);
+        const contactName = contactInfo.name || contactInfo.pushname || phoneNumber;
+        return {
+          name: contactName,
+          authorized: true
+        };
+      } catch (contactError) {
+        console.error('Erro ao buscar informações do contato:', contactError);
+        return {
+          name: phoneNumber,
+          authorized: true
+        };
+      }
+    }
+
+    console.log(`🔒 Acesso negado para número não autorizado: ${phoneNumber}`);
+    return {
+      name: phoneNumber,
+      authorized: false
+    };
+  } catch (error) {
+    console.error('❌ Erro ao verificar contato:', error);
+    return {
+      name: phoneNumber,
+      authorized: false,
+      error: true
+    };
+  }
+}
+
+// Função para cadastrar um novo contato (a ser usada manualmente quando necessário)
+async function addNewContact(sheets, phoneNumber, name = 'DELIVERY') {
+  const sheetId = '18akn_Oi_2L2IakzW-2_JUy6I88JhPmCKHnrXWg-cLic';
+  const range = 'Contatos!A:B'; // Apenas as colunas A e B para verificar contatos
 
   try {
-    // Buscar dados da planilha
+    // Obter contatos existentes
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: sheetId,
       range: range,
     });
 
-    const rows = response.data.values || [];
+    const existingContacts = response.data.values || [];
+    const existingNumbers = existingContacts.map(contact => contact[1]); // Assume que o número está na coluna B
 
-    // Procurar contato pelo número de telefone
-    const contactRow = rows.find(row => row[1] === phoneNumber);
-
-    if (contactRow) {
-      // Se encontrar, retorna o nome salvo
-      return contactRow[0] || phoneNumber;
-    } else {
-      // Se não encontrar, adicionar novo contato com o número
-      const newContact = [phoneNumber, phoneNumber, new Date().toLocaleString()];
-
-      await sheets.spreadsheets.values.append({
-        spreadsheetId: sheetId,
-        range: range,
-        valueInputOption: 'USER_ENTERED',
-        resource: { values: [newContact] },
-      });
-
-      return phoneNumber;
+    // Verifica se o número já está cadastrado
+    if (existingNumbers.includes(phoneNumber)) {
+      console.log(`📌 O contato ${name} - ${phoneNumber} já está cadastrado.`);
+      return false; // Não adiciona novamente
     }
+
+    const newContact = [name, phoneNumber, new Date().toLocaleString()];
+
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: sheetId,
+      range: 'Contatos!A:C',
+      valueInputOption: 'USER_ENTERED',
+      resource: { values: [newContact] },
+    });
+
+    console.log(`✅ Novo contato cadastrado: ${name} - ${phoneNumber}`);
+    return true;
   } catch (error) {
-    console.error('❌ Erro ao gerenciar contatos:', error);
-    return phoneNumber; // Fallback para o número em caso de erro
+    console.error('❌ Erro ao cadastrar novo contato:', error);
+    return false;
   }
 }
 
+// Função para sincronizar membros do grupo com a lista de contatos autorizados
+async function syncGroupMembers(client, sheets, notificationGroupId) {
+  try {
+    console.log(`🔄 Iniciando sincronização de membros do grupo ${notificationGroupId}...`);
+    const participants = await client.getGroupMembers(notificationGroupId);
+
+    if (!participants || participants.length === 0) {
+      console.log('⚠️ Nenhum participante encontrado no grupo');
+      return;
+    }
+
+    console.log(`📊 Total de participantes encontrados: ${participants.length}`);
+
+    // Limpar set existente
+    groupMembers.clear();
+
+    // Adicionar todos os participantes ao set
+    for (const participant of participants) {
+      const memberNumber = participant.id.user + '@c.us';
+      groupMembers.add(memberNumber);
+
+      // Armazena mais detalhadamente as informações dos participantes para uso posterior
+      const memberName = participant.name || participant.pushname || memberNumber;
+      console.log(`👤 Membro adicionado: ${memberName} (${memberNumber})`);
+
+      // Opcionalmente, você pode adicionar/atualizar na planilha também
+      await addNewContact(sheets, memberNumber, memberName);
+    }
+
+    console.log(`✅ Sincronização concluída! ${groupMembers.size} membros autorizados.`);
+  } catch (error) {
+    console.error('❌ Erro ao sincronizar membros do grupo:', error);
+    console.error('Detalhes do erro:', error.stack);
+  }
+}
+
+// Função para verificar se um número está entre os membros do grupo
+function isAuthorizedMember(phoneNumber) {
+  console.log(`Verificando autorização para: ${phoneNumber}`);
+  console.log(`Membros autorizados: ${Array.from(groupMembers)}`);
+  return groupMembers.has(phoneNumber);
+}
+
 function parseMessage(message) {
-  // Converte a mensagem para um formato padrão para melhor matching
   const normalizedBody = message.body.replace(/\s+/g, ' ').trim();
 
-  // Padrões atualizados para capturar campos opcionais como observação
   const lancamentoNotaPattern = /Lançamento de Cupom Fiscal\s+Cod:\s*(\d+)\s+Nome:\s*([\wÀ-ÿ\s]+)\s+Data:\s*(\d{2}\/\d{2}\/\d{4})\s+Coo:\s*(\d+)\s+Operadora:\s*([\wÀ-ÿ\s]+)\s+Ecf:\s*(\d+)\s+Valor:\s*(R\$\s*[\d,.]+)(?:\s+Observação:\s*([\s\S]*))?/i;
 
   const lancamentoNotinhaPattern = /Lançamento de Notinha Branca\s+Cod:\s*(\d+)\s+Nome:\s*([\wÀ-ÿ\s]+)\s+Data:\s*(\d{2}\/\d{2}\/\d{4})\s+Valor:\s*(R\$\s*[\d,.]+)(?:\s+Observação:\s*([\s\S]*))?/i;
 
   const aumentoLimitePattern = /Aumento de Limite\s+Cod:\s*(\d+)\s+Nome:\s*([\wÀ-ÿ\s]+)\s+Valor:\s*(R\$\s*[\d,.]+)\s+E-mail:\s*([\w.+-]+@[\w-]+\.[a-zA-Z0-9-.]+)/i;
 
-  // Novos padrões para Situação 70
   const adicionarSituacao70Pattern = /Adicionar Situação 70\s+Cod:\s*(\d+)\s+Nome:\s*([\wÀ-ÿ\s]+)/i;
   const removerSituacao70Pattern = /Remover Situação 70\s+Cod:\s*(\d+)\s+Nome:\s*([\wÀ-ÿ\s]+)/i;
 
   let responseMessage = '';
   let messageData = {};
 
-  // Verificação para lançamento de cupom fiscal
   if (lancamentoNotaPattern.test(normalizedBody)) {
     const match = normalizedBody.match(lancamentoNotaPattern);
     if (!match) return { responseMessage: 'Erro ao processar mensagem.', messageData: {} };
@@ -97,9 +199,7 @@ function parseMessage(message) {
     if (match[8]) {
       responseMessage += `\nObservação: ${match[8]}`;
     }
-  }
-  // Verificação para lançamento de notinha branca
-  else if (lancamentoNotinhaPattern.test(normalizedBody)) {
+  } else if (lancamentoNotinhaPattern.test(normalizedBody)) {
     const match = normalizedBody.match(lancamentoNotinhaPattern);
     if (!match) return { responseMessage: 'Erro ao processar mensagem.', messageData: {} };
 
@@ -122,9 +222,7 @@ function parseMessage(message) {
     if (match[5]) {
       responseMessage += `\nObservação: ${match[5]}`;
     }
-  }
-  // Verificação para aumento de limite
-  else if (aumentoLimitePattern.test(normalizedBody)) {
+  } else if (aumentoLimitePattern.test(normalizedBody)) {
     const match = normalizedBody.match(aumentoLimitePattern);
     if (!match) return { responseMessage: 'Erro ao processar mensagem.', messageData: {} };
 
@@ -141,9 +239,7 @@ function parseMessage(message) {
     };
 
     responseMessage = `Aumento de Limite:\n\nCod: ${match[1]}\nNome: ${match[2]}\nValor: ${match[3]}\nE-mail: ${match[4]}`;
-  }
-  // Verificação para adicionar situação 70
-  else if (adicionarSituacao70Pattern.test(normalizedBody)) {
+  } else if (adicionarSituacao70Pattern.test(normalizedBody)) {
     const match = normalizedBody.match(adicionarSituacao70Pattern);
     if (!match) return { responseMessage: 'Erro ao processar mensagem.', messageData: {} };
 
@@ -160,9 +256,7 @@ function parseMessage(message) {
     };
 
     responseMessage = `Adicionar Situação 70:\n\nCod: ${match[1]}\nNome: ${match[2]}`;
-  }
-  // Verificação para remover situação 70
-  else if (removerSituacao70Pattern.test(normalizedBody)) {
+  } else if (removerSituacao70Pattern.test(normalizedBody)) {
     const match = normalizedBody.match(removerSituacao70Pattern);
     if (!match) return { responseMessage: 'Erro ao processar mensagem.', messageData: {} };
 
@@ -179,8 +273,7 @@ function parseMessage(message) {
     };
 
     responseMessage = `Remover Situação 70:\n\nCod: ${match[1]}\nNome: ${match[2]}`;
-  }
-  else {
+  } else {
     responseMessage = 'Mensagem não reconhecida.';
     messageData = {};
   }
@@ -200,65 +293,124 @@ venom.create({
 }).then(async (client) => {
   console.log('✅ Bot inicializado com sucesso!');
 
-  const sheets = await authenticateGoogleSheets();  // Autenticar Google Sheets na inicialização
-  const gruposBloqueados = ['120363220294330138@g.us']; // Lista de grupos que o bot NÃO deve ler
+  // Inicializar Google Sheets
+  const sheets = await authenticateGoogleSheets();
 
+  // Variáveis globais
+  const notificationGroupId = '120363220294330138@g.us'; // Grupo Lançamento de Notas
+  const gruposBloqueados = [notificationGroupId]; // Grupos onde o bot NÃO processa mensagens
+  const numeroDelivery = "553432213147"; // Número do delivery para encaminhamento
+
+  // Sincronizar membros do grupo imediatamente após a inicialização
+  await syncGroupMembers(client, sheets, notificationGroupId);
+
+  // Configurar sincronização periódica (a cada 1 hora, por exemplo)
+  setInterval(async () => {
+    await syncGroupMembers(client, sheets, notificationGroupId);
+  }, 3600000); // 1 hora em milissegundos
+
+  // Atualização do manipulador de mensagens para corrigir o envio de vCard
   client.onMessage(async (message) => {
     try {
       // Verifica se a mensagem veio de um grupo bloqueado
       if (message.isGroupMsg && gruposBloqueados.includes(message.from)) {
         return; // Sai da função sem processar
       }
+
       if (message.body) {
         console.log(`📩 Mensagem recebida de ${message.from}: ${message.body}`);
 
-        // Obter ou atualizar informações do contato
-        const contactName = await getOrUpdateContact(sheets, message.from);
-        const userPhoneNumber = message.from;
+        // Verificar se o contato é membro do grupo (autorizado)
+        const contactInfo = await checkContact(message.from, client);
+
+        // Se o contato não estiver autorizado, envia mensagem de redirecionamento
+        if (!contactInfo.authorized) {
+          console.log(`❗ Contato não autorizado: ${message.from}`);
+
+          // Mensagem informando que não está autorizado
+          await client.sendText(message.from,
+            `Olá! Este número não está autorizado a utilizar este sistema. 😊\n\n` +
+            `Se você está procurando pelo delivery do União Supermercados, por favor use o número oficial:`
+          );
+
+          // Método 1: Enviar vCard usando método correto da API atual
+          try {
+            const vcard = `BEGIN:VCARD
+VERSION:3.0
+FN:União Delivery
+TEL;type=CELL;type=VOICE;waid=553433213147:+55 34 3321-3147
+END:VCARD`;
+
+            await client.sendVCard(
+              message.from,  // destino
+              vcard,         // conteúdo do vCard
+              'União Delivery' // nome de exibição
+            );
+            console.log('✅ vCard enviado com sucesso (método 1)');
+          } catch (vcardError) {
+            console.error('❌ Erro ao enviar vCard (método 1):', vcardError);
+
+            // Método 2: Alternativa - tentar com outra função da API
+            try {
+              await client.sendContactVcard(
+                message.from,       // destino
+                '553433213147@c.us', // contato (com @c.us)
+                'União Delivery'    // nome de exibição
+              );
+              console.log('✅ vCard enviado com sucesso (método 2)');
+            } catch (vcardError2) {
+              console.error('❌ Erro ao enviar vCard (método 2):', vcardError2);
+
+              // Método 3: Enviar apenas o contato como texto se tudo falhar
+              await client.sendText(
+                message.from,
+                `Para delivery, adicione este contato: +55 34 3321-3147`
+              );
+              console.log('⚠️ Enviou apenas texto do contato como fallback');
+            }
+          }
+
+          return; // Encerra o processamento da mensagem
+        }
+
+        // O restante do código permanece igual...
         const { responseMessage, messageData } = parseMessage(message);
-
-
-        //--------------------------------------------------------------------------------------------------------------------//
-        //Ativar quando for testar                                                                                            //
-        // const groupId = '553499630454-1567631375@g.us';                                                                    //
-        // Grupo Lançamento de Notas                                                                                          //
-            const groupId = '120363220294330138@g.us';                                                                        //
-        //--------------------------------------------------------------------------------------------------------------------//
-
-
 
         if (messageData.tipo) {
           const registroId = Math.floor(100000 + Math.random() * 900000);
-          client.sendText(message.from, `✅ Mensagem identificada, olá ${contactName}! Seu ID de registro é: #${registroId}`);
 
-          // Determinar qual grupo deve receber a notificação com base no tipo
-          let notificationGroupId = groupId;
+          // Resposta mais humanizada com o nome do contato
+          const saudacao = obterSaudacao();
+          client.sendText(message.from,
+            `✅ ${saudacao}, ${contactInfo.name}! Sua solicitação foi recebida com sucesso.\n\n` +
+            `Seu ID de registro é: #${registroId}\n\n` +
+            `Em breve nossa equipe irá processar seu pedido. Obrigado! 😊`
+          );
 
-          // Opcional: Se quiser direcionar os tipos de mensagem para grupos diferentes
-          // if (messageData.tipo.includes('Situação 70')) {
-          //     notificationGroupId = 'ID_DO_GRUPO_SITUACAO70@g.us';
-          // }
-
-          client.sendText(notificationGroupId, `📢 *Novo ${messageData.tipo} registrado por ${contactName}!* \n\n${responseMessage}`);
+          // Envia notificação para o grupo com informações mais detalhadas
+          client.sendText(notificationGroupId,
+            `📢 *Novo ${messageData.tipo} registrado!* \n\n` +
+            `👤 *Solicitante:* ${contactInfo.name}\n` +
+            `🆔 *ID do Registro:* #${registroId}\n\n` +
+            `${responseMessage}`
+          );
 
           // Opcional: Armazenar no Google Sheets
-          // await storeMessageInSheet(sheets, messageData, contactName, registroId);
+          // await storeMessageInSheet(sheets, messageData, contactInfo.name, registroId);
         } else {
           // Log de mensagens não reconhecidas
           console.log(`❓ Mensagem não reconhecida: ${message.body}`);
 
-          // Mensagem de ajuda personalizada
-          const helpMessage = `Olá, ${contactName}! 🤖 
-  
-  Parece que sua mensagem não corresponde aos formatos esperados. 
-  
-  Formatos válidos:
-  1. Lançamento de Cupom Fiscal
-  2. Lançamento de Notinha Branca
-  3. Aumento de Limite
-  4. Adicionar/Remover Situação 70
-  
-  Para ajuda, entre em contato: 343321-3147 📞`;
+          // Mensagem de ajuda personalizada e mais amigável
+          const saudacao = obterSaudacao();
+          const helpMessage = `${saudacao}, ${contactInfo.name}! 🤖 \n\n` +
+            `Parece que sua mensagem não está no formato que consigo processar. \n\n` +
+            `Para que eu possa ajudar, envie sua solicitação em um dos seguintes formatos:\n\n` +
+            `📝 *Lançamento de Cupom Fiscal*\n` +
+            `📝 *Lançamento de Notinha Branca*\n` +
+            `📈 *Aumento de Limite*\n` +
+            `🔄 *Adicionar/Remover Situação 70*\n\n` +
+            `Precisa de mais ajuda? Entre em contato com o Yan: (34) 99963-0454 📞`;
 
           client.sendText(message.from, helpMessage);
         }
@@ -266,9 +418,22 @@ venom.create({
     } catch (error) {
       console.error('❌ Erro no processamento da mensagem:', error);
       // Adiciona tratamento de erro para enviar mensagem ao usuário
-      client.sendText(message.from, 'Desculpe, ocorreu um erro no processamento da sua mensagem.');
+      client.sendText(message.from, 'Desculpe, ocorreu um erro no processamento da sua mensagem. Por favor, tente novamente mais tarde ou contate nosso suporte.');
     }
   });
 }).catch((error) => {
   console.error('❌ Erro crítico ao criar o bot:', error);
 });
+
+// Função para obter saudação de acordo com o horário
+function obterSaudacao() {
+  const hora = new Date().getHours();
+
+  if (hora >= 5 && hora < 12) {
+    return "Bom dia";
+  } else if (hora >= 12 && hora < 18) {
+    return "Boa tarde";
+  } else {
+    return "Boa noite";
+  }
+}
