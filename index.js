@@ -164,14 +164,11 @@ function isAuthorizedMember(phoneNumber) {
 function parseMessage(message) {
   const normalizedBody = message.body.replace(/\s+/g, ' ').trim();
 
-  const lancamentoNotaPattern = /Lançamento de Cupom Fiscal\s+Cod:\s*(\d+)\s+Nome:\s*([\wÀ-ÿ\s]+)\s+Data:\s*(\d{2}\/\d{2}\/\d{4})\s+Coo:\s*(\d+)\s+Operadora:\s*([\wÀ-ÿ\s]+)\s+Ecf:\s*(\d+)\s+Valor:\s*(R\$\s*[\d,.]+)(?:\s+Observação:\s*([\s\S]*))?/i;
-
-  const lancamentoNotinhaPattern = /Lançamento de Notinha Branca\s+Cod:\s*(\d+)\s+Nome:\s*([\wÀ-ÿ\s]+)\s+Data:\s*(\d{2}\/\d{2}\/\d{4})\s+Valor:\s*(R\$\s*[\d,.]+)(?:\s+Observação:\s*([\s\S]*))?/i;
-
-  const aumentoLimitePattern = /Aumento de Limite\s+Cod:\s*(\d+)\s+Nome:\s*([\wÀ-ÿ\s]+)\s+Valor:\s*(R\$\s*[\d,.]+)\s+E-mail:\s*([\w.+-]+@[\w-]+\.[a-zA-Z0-9-.]+)/i;
-
-  const adicionarSituacao70Pattern = /Adicionar Situação 70\s+Cod:\s*(\d+)\s+Nome:\s*([\wÀ-ÿ\s]+)/i;
-  const removerSituacao70Pattern = /Remover Situação 70\s+Cod:\s*(\d+)\s+Nome:\s*([\wÀ-ÿ\s]+)/i;
+  const lancamentoNotaPattern = /Lançamento de Cupom Fiscal\s+Cod:\s*(\d+)\s+Nome:\s*(.+?)\s+Data:\s*(\d{2}\/\d{2}\/\d{4})\s+Coo:\s*(\d+)\s+Operadora:\s*(.+?)\s+Ecf:\s*(\d+)\s+Valor:\s*(R\$\s*[\d,.]+)(?:\s+Observação:\s*([\s\S]*))?/i;
+  const lancamentoNotinhaPattern = /Lançamento de Notinha Branca\s+Cod:\s*(\d+)\s+Nome:\s*(.+?)\s+Data:\s*(\d{2}\/\d{2}\/\d{4})\s+Valor:\s*(R\$\s*[\d,.]+)(?:\s+Observação:\s*([\s\S]*))?/i;
+  const aumentoLimitePattern = /Aumento de Limite\s+Cod:\s*(\d+)\s+Nome:\s*(.+?)\s+Valor:\s*(R\$\s*[\d,.]+)\s+E-mail:\s*([\w.+-]+@[\w-]+\.[a-zA-Z0-9-.]+)/i;
+  const adicionarSituacao70Pattern = /Adicionar Situação 70\s+Cod:\s*(\d+)\s+Nome:\s*(.+)/i;
+  const removerSituacao70Pattern = /Remover Situação 70\s+Cod:\s*(\d+)\s+Nome:\s*(.+)/i;
 
   let responseMessage = '';
   let messageData = {};
